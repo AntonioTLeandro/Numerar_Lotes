@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/numerar_lote" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
