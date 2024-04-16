@@ -21,21 +21,18 @@
  *                                                                         *
  ***************************************************************************/
 """
-from re import T
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from qgis.PyQt import QtCore
 from qgis.gui import *
-from PyQt5 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui, QtWidgets
 import pdb
 from qgis.core import *
 
-from qgis.gui import QgsMessageBar, QgsMapCanvas, QgsMapCanvasItem
 import qgis.utils
 import os
 from collections import defaultdict
 
-from shapely.wkb import loads
 from osgeo import ogr
 import processing
 
@@ -55,14 +52,14 @@ def redefine_order(coordPoly, vertices, coordPoly_inters, tipo):
     CoordX = 0
     CoordY = 0
     if tipo == 1002 or tipo == 2:
-        CoordX = coordPoly_inters.GetX(0)
-        CoordY = coordPoly_inters.GetY(0)
+        CoordX = coordPoly_inters.GetX(1)
+        CoordY = coordPoly_inters.GetY(1)
     else:
         y = 0
         for coord_itens in coordPoly_inters:
             if y == 0:
-                CoordX = coord_itens.GetX(0)
-                CoordY = coord_itens.GetY(0)
+                CoordX = coord_itens.GetX(1)
+                CoordY = coord_itens.GetY(1)
 
     x = 0
     k = 0
@@ -172,7 +169,7 @@ def clockUnclock(coordPoly, vertices):
     else:
         return False    
 
-def verificar_intersect(camadaLote, camadaQuadra):
+def verificar_intersect(camadaLote, camadaQuadra, maior, menor, soma):
     intersect = camadaQuadra.intersection(camadaLote)
     corrdsList = []
     if intersect:
@@ -207,6 +204,7 @@ def verificar_intersect(camadaLote, camadaQuadra):
                             coords_i.append(QgsPointXY(items.GetX(1), items.GetY(1)))
                             item_anterior = items
                     d += 1 
+        
         if coords_i:
             list_coords_aux.append(coords_i)
             j_1 = 0
@@ -233,18 +231,33 @@ def verificar_intersect(camadaLote, camadaQuadra):
                 j_1 += 1
 
     retorno = 0
+    idSeg = 0
     for item in corrdsList:   
         feature_lineg = QgsFeature()
         geom_lineg =  QgsGeometry.fromPolylineXY(item[0])
         tam = geom_lineg.length()
-        retorno = int(tam)
-    
-    return retorno
+        if maior:
+            if idSeg == 0:
+                retorno = tam
+            else:
+                if tam > retorno:
+                    retorno = tam  
 
-def dissolver(layer):
-    p_dissolver = {'INPUT':layer,'FIELD':'','GEOMETRY':'geometry','EXPLODE_COLLECTIONS':True,'KEEP_ATTRIBUTES':False,'COUNT_FEATURES':False,'COMPUTE_AREA':False,'COMPUTE_STATISTICS':False,'STATISTICS_ATTRIBUTE':'','OPTIONS':'','OUTPUT':'TEMPORARY_OUTPUT'}
-    dissolver = processing.run("gdal:dissolve",p_dissolver)
-    return dissolver['OUTPUT']
+        elif menor:
+            if idSeg == 0:
+                retorno = tam
+            else:
+                if tam < retorno:
+                    retorno = tam 
+
+        elif soma:
+            if idSeg == 0:
+                retorno = tam
+            else:
+                retorno += tam 
+        
+        idSeg += 1    
+    return int(retorno)
 
 class numerar_lote:
     """QGIS Plugin Implementation."""
@@ -389,7 +402,25 @@ class numerar_lote:
         self.dlg.select_caminho.clicked.connect(self.selecione_caminho)
         self.dlg.salvememoria.clicked.connect(self.verificar_salvememeoria)
         self.dlg.pushButton.clicked.connect(self.definir_inicial)
-        self.dlg.numeracaoS.setEnabled(True)
+        self.dlg.pushButton.clicked.connect(self.definir_inicial)
+        self.dlg.numeracaoS.clicked.connect(self.loadInicial)
+        self.dlg.numeracaoT.clicked.connect(self.tipoNumeracao)
+        self.loadInicial()
+        self.dlg.button_box.button(QtWidgets.QDialogButtonBox.Ok).clicked.connect(self.runExecute)
+        self.dlg.button_box.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(self.close)
+
+    
+    def tipoNumeracao(self):
+        self.dlg.groupBox_3.setEnabled(True)
+        self.dlg.numeroInicial.setEnabled(False)
+        self.dlg.label_2.setEnabled(False)
+        self.dlg.numeracaoS.setChecked(False)
+
+    def loadInicial(self):
+        self.dlg.groupBox_3.setEnabled(False)
+        self.dlg.numeroInicial.setEnabled(True)
+        self.dlg.label_2.setEnabled(True)
+        self.dlg.numeracaoT.setChecked(False)
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
@@ -416,25 +447,13 @@ class numerar_lote:
 
                 #layer_line = QgsVectorLayer("LineString?", "layer_line", "memory" )
 
-                rr_dissolver = dissolver(select) 
+                rr_dissolver = self.dissolver(select) 
                 layer_dissolver = QgsVectorLayer(rr_dissolver,'dissolver','ogr')
 
                 selection = layerselect.selectedFeatures()
                 list_id_select = []
                 for feature_selec in selection:
                     list_id_select.append(feature_selec.id())
-
-                #pr = layer_line.dataProvider()
-                #for feature in layer_dissolver.getFeatures():
-                #    geom_feat = feature.geometry()
-                #    geom_feat_m = geom_feat.asMultiPolygon()
-                #    for geom_listi in geom_feat_m:
-                #        for geom_list_ti in geom_listi:
-                #            feature_line = QgsFeature()
-
-                #            geom_line =  QgsGeometry.fromPolylineXY(geom_list_ti)
-                #            feature_line.setGeometry(geom_line)
-                #            pr.addFeature(feature_line) 
 
                 list_quadras = []         
                 for feature in layer_dissolver.getFeatures():
@@ -464,20 +483,14 @@ class numerar_lote:
                 del layer_dissolver
                 del layerselect
 
-
-
-
-
     def verificar_salvememeoria(self):
         verificar = self.dlg.salvememoria.isChecked()
         if verificar: 
             self.dlg.select_caminho.setEnabled(False)
             self.dlg.caminho.setEnabled(False)
-            self.dlg.label_5.setEnabled(False)
         else: 
             self.dlg.select_caminho.setEnabled(True)
             self.dlg.caminho.setEnabled(True)
-            self.dlg.label_5.setEnabled(True)
 
     def selecione_caminho(self):
         # Abri janela para escolher caminho onde vai salvar o shape
@@ -500,66 +513,120 @@ class numerar_lote:
         self.dlg.caminho.setText(self.outFilePath)
         self.nomeshape = files
 
-    def run(self):
-        """Run method that performs all the real work"""
-        self.dlg.caminho.clear() 
-        self.dlg.numeracaoS.setChecked(True)
+    def dissolver(self, layer):
+        p_dissolver = {
+            'INPUT':layer,
+            'FIELD':[],
+            'SEPARATE_DISJOINT':False,
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            }
+        dissolver = processing.run("native:dissolve", p_dissolver)
 
-        layers = QgsProject.instance().mapLayers().values()
-        self.dlg.select_layer.clear()
-        for layer in layers:
-            if layer.type() == QgsMapLayer.VectorLayer and layer.geometryType() == QgsWkbTypes.PolygonGeometry:
-                self.dlg.select_layer.addItem( layer.name(), layer )  
-        # Create the dialog with elements (after translation) and keep reference
-        # Only create GUI ONCE in callback, so that it will only load when the plugin is started
-        #if self.first_start == True:
-        #    self.first_start = False
-        #    self.dlg = numerar_loteDialog()
+        alg_params = {
+            'INPUT':dissolver['OUTPUT'],
+            'CONVERT_ALL_LAYERS':False,
+            'OPTIONS':'',
+            'OUTPUT':QgsProcessing.TEMPORARY_OUTPUT
+            }
+        convertformat = processing.run('gdal:convertformat', alg_params)
 
-        # show the dialog
-        self.dlg.show()
-        # Run the dialog event loop
-        result = self.dlg.exec_()
-        # See if OK was pressed
-        if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
+        return convertformat['OUTPUT']
+    
+    def separarSelecionados(self, layer):
+        alg_params = {
+            'INPUT':layer,
+            'OUTPUT':QgsProcessing.TEMPORARY_OUTPUT
+            }
+        saveselectedfeatures = processing.run('native:saveselectedfeatures', alg_params)
 
-            if not self.dlg.salvememoria.isChecked() and not self.dlg.caminho.text():
-                self.iface.messageBar().pushMessage("Alerta", "Existe campos obrigatório sem preenchimento.", level=Qgis.Warning) 
-            else: 
-                shape_informacao = []
-                layerselect = ''
-                layer_line = QgsVectorLayer("LineString?", "layer_line", "memory" )
-                for select in QgsProject.instance().mapLayers().values():
-                    if select.name() == self.dlg.select_layer.currentText():
+        alg_params = {
+            'INPUT': saveselectedfeatures['OUTPUT'],
+            'CONVERT_ALL_LAYERS':False,
+            'OPTIONS':'',
+            'OUTPUT':QgsProcessing.TEMPORARY_OUTPUT
+            }
+
+        convertformat = processing.run('gdal:convertformat', alg_params)
+
+        return saveselectedfeatures['OUTPUT']
+
+    def close(self):
+        self.dlg.close()
+        pass
+
+    def runExecute(self):
+
+        if not self.dlg.salvememoria.isChecked() and not self.dlg.caminho.text():
+            self.iface.messageBar().pushMessage("Alerta", "Obrigatorio definir o caminho de saida, ou marcar para gerar arquivo temporario.", level=Qgis.Warning) 
+            self.dlg.close()
+        elif self.dlg.numeracaoT.isChecked() and not self.dlg.maiorT.isChecked() and not self.dlg.menorT.isChecked() and not self.dlg.somarT.isChecked():
+            self.iface.messageBar().pushMessage("Alerta", "Obrigatorio definir o tipo de tipo de testada a ser usado.", level=Qgis.Warning) 
+            self.dlg.close()
+        else: 
+            shape_informacao = []
+            layerselect = ''
+            layer_line = QgsVectorLayer("LineString?", "layer_line", "memory" )
+
+            for select in QgsProject.instance().mapLayers().values():    
+                if select.name() == self.dlg.select_layer.currentText():
+                    if self.dlg.selecionados.isChecked():
+                        layerselect = self.separarSelecionados(select)
+                        #layerselect = QgsVectorLayer(caminhoMaterial, "LOTES", "ogr")
+                        #QgsProject.instance().addMapLayer(layerselect)
+                        if len([f  for f in layerselect.getFeatures()])== 0:
+                            verificacaoGeral = False
+                            self.iface.messageBar().pushMessage("Alerta", "Nenhum lote selecionado, obrigado selecionar os lotes ao definir Apenas Selecionados.", level=Qgis.Warning) 
+                            self.dlg.close()
+                            pass  
+                    else:
                         layerselect = select
-                        sRs = layerselect.crs()
-                        r_dissolver = dissolver(select) 
-                        layer_dissolver = QgsVectorLayer(r_dissolver,'dissolver','ogr')
 
-                        
-                        pr = layer_line.dataProvider()
-                        for feature in layer_dissolver.getFeatures():
+                    sRs = layerselect.crs()
+                    r_dissolver = self.dissolver(select) 
+                    layer_dissolver = QgsVectorLayer(r_dissolver,'dissolver','ogr')
+                    
+                    pr = layer_line.dataProvider()
+                    for feature in layer_dissolver.getFeatures():
+                        geom_feat = feature.geometry()
+                        geom_feat_m = geom_feat.asMultiPolygon()
+                        for geom_listi in geom_feat_m:
+                            for geom_list_ti in geom_listi:
+                                feature_line = QgsFeature()
 
-                        #for feat in select.getFeatures():
-                            geom_feat = feature.geometry()
-                            geom_feat_m = geom_feat.asMultiPolygon()
-                            for geom_listi in geom_feat_m:
-                                for geom_list_ti in geom_listi:
-                                    feature_line = QgsFeature()
+                                geom_line =  QgsGeometry.fromPolylineXY(geom_list_ti)
+                                feature_line.setGeometry(geom_line)
+                                pr.addFeature(feature_line) 
 
-                                    geom_line =  QgsGeometry.fromPolylineXY(geom_list_ti)
-                                    feature_line.setGeometry(geom_line)
-                                    pr.addFeature(feature_line) 
+            field_names = layerselect.fields()
+            verificarColuna = True
+            idColunaDEF_LOTE = None
+            for field_attr in field_names:
+                if field_attr.name() == "DEF_LOTE":
+                    verificarColuna = False
+                    idColunaDEF_LOTE = field_names.indexFromName('DEF_LOTE') 
 
+            lista_dados = []
+            verificacaoGeral = True
+            if verificarColuna:
+                verificacaoGeral = False
+                self.iface.messageBar().pushMessage("Alerta", "Obrigatorio definir os lotes iniciais.", level=Qgis.Warning) 
+                self.dlg.close()
+                pass
+            
+            filter = QgsFeatureRequest().setFilterExpression('"DEF_LOTE" = true')
+            if len([f  for f in layerselect.getFeatures(filter)])== 0:
+                verificacaoGeral = False
+                self.iface.messageBar().pushMessage("Alerta", "Obrigatorio definir os lotes iniciais.", level=Qgis.Warning) 
+                self.dlg.close()
+                pass
 
-                #pr_layer_lotes = layerselect.dataProvider()
-                lista_dados = []
-                
+            if verificacaoGeral:
                 for feature in layer_line.getFeatures():
                     lista_ids = []
-                    numero_lote = 0
+                    if self.dlg.numeracaoS.isChecked():
+                        numero_lote = self.dlg.numeroInicial.value()
+                    else:
+                        numero_lote = 0
                     d = 0
                     geom_quadra = feature.geometry()
                     filter = QgsFeatureRequest().setFilterExpression('"DEF_LOTE" = true')
@@ -569,20 +636,16 @@ class numerar_lote:
                         intersect = geom_quadra.intersection(geom_lote)
                         if intersect:
                             if self.dlg.numeracaoS.isChecked():
-                                numero_lote = numero_lote + 1
                                 attr.append(numero_lote)
 
                             if self.dlg.numeracaoT.isChecked():
-                                tamTestada = verificar_intersect(geom_quadra, geom_lote)
+                                tamTestada = verificar_intersect(geom_quadra, geom_lote, self.dlg.maiorT.isChecked(), self.dlg.menorT.isChecked(), self.dlg.somarT.isChecked())
                                 numero_lote = numero_lote + tamTestada
                                 attr.append(numero_lote)
 
                             if d == 0:
                                 lista_ids.append(feature_Lote.id())
                                 lista_dados.append([geom_lote, attr])   
-
-                            #attrs = { 1: numero_lote}
-                            #pr_layer_lotes.changeAttributeValues({feature_Lote.id(): attrs})
 
                             wkb_q = geom_quadra.asWkb() 
                             geom_ogr_q = ogr.CreateGeometryFromWkb(wkb_q)
@@ -607,42 +670,47 @@ class numerar_lote:
                                             if  self.dlg.numeracaoS.isChecked():
                                                 numero_lote = numero_lote + 1
                                             if self.dlg.numeracaoT.isChecked():
-                                                tamTestada = verificar_intersect(geom_quadra, geom_lote_1)
+                                                tamTestada = verificar_intersect(geom_quadra, geom_lote_1, self.dlg.maiorT.isChecked(), self.dlg.menorT.isChecked(), self.dlg.somarT.isChecked())
                                                 numero_lote = numero_lote + tamTestada
 
                                             attr_1.append(numero_lote)
-                                            lista_dados.append([geom_lote_1, attr_1])
-                                            #attrs_2 = { 1: numero_lote}
-                                            #pr_layer_lotes.changeAttributeValues({feature_Lote_1.id(): attrs_2})   
+                                            lista_dados.append([geom_lote_1, attr_1]) 
+                               
                 
-                field_names = layerselect.fields()
-
                 if self.dlg.salvememoria.isChecked(): 
-
+                    IdColuna = None
                     shapeLotes = QgsVectorLayer("polygon?crs=" + sRs.authid(), "LOTES", "memory" )
                     pr_shapeLotes = shapeLotes.dataProvider()
 
                     for field_attr in field_names:
-                        pr_shapeLotes.addAttributes([QgsField(field_attr.name(),field_attr.type())])
-                        shapeLotes.updateFields()
+                        if field_attr.name() == "NLATUAL":
+                            IdColuna = field_names.indexFromName('NLATUAL') 
+                        else:  
+                            pr_shapeLotes.addAttributes([QgsField(field_attr.name(),field_attr.type())])
+                            shapeLotes.updateFields()
 
                     pr_shapeLotes.addAttributes([QgsField("NLATUAL", QVariant.Int)])
                     shapeLotes.updateFields()
 
                     for item in lista_dados:
+                        attributos = item[1]
+                        if IdColuna != None:
+                            del(attributos[IdColuna])
+
                         self.featu = QgsFeature()
                         self.featu.setGeometry(item[0])
-                        self.featu.setAttributes(item[1])
+                        self.featu.setAttributes(attributos)
                         pr_shapeLotes.addFeature(self.featu)
-
                     QgsProject.instance().addMapLayer(shapeLotes)
-
                 else:
-
                     self.Fields = QgsFields()
-
+                    IdColuna = None
                     for field_attr in field_names:
-                        self.Fields.append(QgsField(field_attr.name(),field_attr.type()))
+                        if field_attr.name() == "NLATUAL":
+                            IdColuna = field_names.indexFromName('NLATUAL') 
+                        else:  
+                            self.Fields.append(QgsField(field_attr.name(),field_attr.type())) 
+
                     self.Fields.append(QgsField("NLATUAL", QVariant.Int))
 
                     global SHPCaminho
@@ -650,9 +718,12 @@ class numerar_lote:
                     self.shape_articulacao = QgsVectorFileWriter(SHPCaminho, self.encoding, self.Fields, QgsWkbTypes.Polygon, sRs, "ESRI Shapefile")
                     
                     for item in lista_dados:
+                        attributos = item[1]
+                        if IdColuna != None:
+                            del(attributos[IdColuna])
                         self.featu = QgsFeature()
                         self.featu.setGeometry(item[0])
-                        self.featu.setAttributes(item[1])
+                        self.featu.setAttributes(attributos)
                         self.shape_articulacao.addFeature(self.featu)
 
                     pegarNome = self.outFilePath
@@ -672,17 +743,19 @@ class numerar_lote:
                     QgsProject.instance().removeMapLayer(self.layer)
                     self.layer = QgsVectorLayer(self.outFilePath, nomefinalshp, "ogr")
                     QgsProject.instance().addMapLayer(self.layer)
-                
+                self.dlg.close()
+                pass
 
+    def run(self):
+        """Run method that performs all the real work"""
+        self.loadInicial()
+        self.dlg.caminho.clear() 
+        self.dlg.numeracaoS.setChecked(True)
 
+        layers = QgsProject.instance().mapLayers().values()
+        self.dlg.select_layer.clear()
+        for layer in layers:
+            if layer.type() == QgsMapLayer.VectorLayer and layer.geometryType() == QgsWkbTypes.PolygonGeometry:
+                self.dlg.select_layer.addItem( layer.name(), layer )  
+        self.dlg.show()
 
-
-
-
-
-
-
-
-
-
-            pass
